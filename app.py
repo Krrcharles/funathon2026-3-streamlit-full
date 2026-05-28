@@ -134,7 +134,7 @@ def load_inference_model():
         raise RuntimeError(
             "Failed to load the pretrained MLflow model. "
             "This is usually caused by an incompatible transformers version; "
-            "use transformers==4.40.2."
+            "use transformers==4.46.3 and tokenizers==0.20.3."
         ) from exc
 
     run_params = requests.get(MLFLOW_ENDPOINT + "/" + MLFLOW_MODEL_S3_RUN_PATH + "params.json", timeout=30).json()

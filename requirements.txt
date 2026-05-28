@@ -6,7 +6,7 @@ pyproj
 folium
 streamlit-folium
 matplotlib
-
 mlflow
 s3fs
-transformers==4.40.2
+transformers==4.46.3
+tokenizers==0.20.3
