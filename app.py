@@ -7,7 +7,6 @@ import requests
 import streamlit as st
 from matplotlib import colormaps
 from matplotlib.colors import to_rgba
-from pyproj import Transformer
 from rasterio.io import MemoryFile
 from streamlit_folium import st_folium
 
@@ -116,27 +115,21 @@ function evaluatePixel(sample) {
     return rgb, ndvi_rgba, bounds_4326
 
 
-def clc_label_rgba(bounds_4326, year: int, alpha: float = 0.6):
-    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True)
-    xmin, ymin = transformer.transform(bounds_4326.left, bounds_4326.bottom)
-    xmax, ymax = transformer.transform(bounds_4326.right, bounds_4326.top)
-
-    xmin, xmax = sorted([xmin, xmax])
-    ymin, ymax = sorted([ymin, ymax])
+def clc_label_rgba(bounds_4326, year: int, out_width: int, out_height: int, alpha: float = 0.6):
+    xmin, ymin, xmax, ymax = bounds_4326.left, bounds_4326.bottom, bounds_4326.right, bounds_4326.top
 
     export_url = (
         f"https://copernicus.discomap.eea.europa.eu/arcgis/rest/services/CLC_plus/"
         f"CLMS_CLCplus_RASTER_{year}_010m_eu/ImageServer/exportImage"
     )
-    size_x = max(1, int((xmax - xmin) / 10))
-    size_y = max(1, int((ymax - ymin) / 10))
     params = {
         "f": "image",
         "bbox": f"{xmin},{ymin},{xmax},{ymax}",
-        "bboxSR": "3035",
-        "imageSR": "3035",
-        "size": f"{size_x},{size_y}",
+        "bboxSR": "4326",
+        "imageSR": "4326",
+        "size": f"{int(out_width)},{int(out_height)}",
         "format": "tiff",
+        "interpolation": "RSP_NearestNeighbor",
     }
 
     resp = requests.get(export_url, params=params, timeout=90)
@@ -195,7 +188,8 @@ def main():
                 rgb, ndvi_rgba, bounds_4326 = sentinelhub_rgb_ndvi(token, lon, lat, half_size_deg, size_px)
 
             with st.spinner("4) Downloading CLC+ label from ImageServer for same bbox..."):
-                label_rgba, classes_present = clc_label_rgba(bounds_4326, int(year))
+                out_h, out_w = rgb.shape[0], rgb.shape[1]
+                label_rgba, classes_present = clc_label_rgba(bounds_4326, int(year), out_w, out_h)
 
             st.session_state.pipeline_result = {
                 "resolved": resolved,
