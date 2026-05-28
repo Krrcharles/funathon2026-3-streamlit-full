@@ -1,4 +1,3 @@
-import io
 import os
 from datetime import date, timedelta
 
@@ -147,22 +146,24 @@ def clc_label_rgba(bounds_4326, year: int, alpha: float = 0.6):
 
 
 def main():
+    if "pipeline_result" not in st.session_state:
+        st.session_state.pipeline_result = None
+
     st.set_page_config(page_title="Funathon Full Acquisition Pipeline", layout="wide")
     st.title("Funathon — Full API Pipeline (Address → Sentinel-2 RGB + CLC+)")
     st.write("This app follows the acquisition pipeline from `1-acquisition.qmd`, but entirely via APIs (no S3 proxy).")
 
     with st.sidebar:
         st.header("Inputs")
-        address = st.text_input("Address / city", value="Luxembourg City, Luxembourg")
-        year = st.number_input("CLC+ year", min_value=2021, max_value=2021, value=2021)
-        half_size_deg = st.slider("Tile half-size (degrees)", 0.005, 0.03, 0.0125, 0.0025)
-        size_px = st.selectbox("Output image size", [256, 384, 512], index=2)
-        end_d = st.date_input("Latest acquisition date", value=date.today())
-        days_back = st.slider("Lookback window (days)", 5, 365, 60)
+        with st.form("pipeline_form"):
+            address = st.text_input("Address / city", value="Luxembourg City, Luxembourg")
+            year = st.number_input("CLC+ year", min_value=2021, max_value=2021, value=2021)
+            half_size_deg = st.slider("Tile half-size (degrees)", 0.005, 0.03, 0.0125, 0.0025)
+            size_px = st.selectbox("Output image size", [256, 384, 512], index=2)
+            end_d = st.date_input("Latest acquisition date", value=date.today())
+            days_back = st.slider("Lookback window (days)", 5, 365, 60)
+            run_btn = st.form_submit_button("Run full pipeline")
 
-    run_btn = st.button("Run full pipeline")
-    if not run_btn:
-        st.stop()
 
     client_id = os.getenv("CDSE_CLIENT_ID")
     client_secret = os.getenv("CDSE_CLIENT_SECRET")
@@ -170,36 +171,59 @@ def main():
         st.error("Missing CDSE credentials in env vars: CDSE_CLIENT_ID / CDSE_CLIENT_SECRET")
         st.stop()
 
-    try:
-        with st.spinner("1) Geocoding address..."):
-            lon, lat, resolved = geocode_address(address)
-        st.success(f"Geocoded: {resolved}")
-        st.write(f"Coordinates (WGS84): lon={lon:.6f}, lat={lat:.6f}")
+    if run_btn:
+        try:
+            with st.spinner("1) Geocoding address..."):
+                lon, lat, resolved = geocode_address(address)
 
-        with st.spinner("2) Querying OData catalog for most recent Sentinel-2 L2A product..."):
-            start_d = end_d - timedelta(days=days_back)
-            product = query_best_l2a_product(lon, lat, start_d, end_d)
-        st.info(f"Selected product: `{product.get('Name')}` | Date: `{product.get('ContentDate', {}).get('Start')}`")
+            with st.spinner("2) Querying OData catalog for most recent Sentinel-2 L2A product..."):
+                start_d = end_d - timedelta(days=days_back)
+                product = query_best_l2a_product(lon, lat, start_d, end_d)
 
-        with st.spinner("3) Getting access token + Sentinel Hub RGB tile..."):
-            token = cdse_access_token(client_id, client_secret)
-            rgb, bounds_4326 = sentinelhub_rgb(token, lon, lat, half_size_deg, size_px)
+            with st.spinner("3) Getting access token + Sentinel Hub RGB tile..."):
+                token = cdse_access_token(client_id, client_secret)
+                rgb, bounds_4326 = sentinelhub_rgb(token, lon, lat, half_size_deg, size_px)
 
-        with st.spinner("4) Downloading CLC+ label from ImageServer for same bbox..."):
-            label_rgba, classes_present = clc_label_rgba(bounds_4326, int(year))
-        st.write(f"CLC+ classes present (0 means nodata): {classes_present}")
+            with st.spinner("4) Downloading CLC+ label from ImageServer for same bbox..."):
+                label_rgba, classes_present = clc_label_rgba(bounds_4326, int(year))
 
-        west, south, east, north = bounds_4326.left, bounds_4326.bottom, bounds_4326.right, bounds_4326.top
-        m = folium.Map(location=[(south + north) / 2, (west + east) / 2], zoom_start=13)
-        folium.raster_layers.ImageOverlay(image=rgb, bounds=[[south, west], [north, east]], name="Sentinel-2 RGB").add_to(m)
-        folium.raster_layers.ImageOverlay(image=label_rgba, bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
-        folium.LayerControl().add_to(m)
+            st.session_state.pipeline_result = {
+                "resolved": resolved,
+                "lon": lon,
+                "lat": lat,
+                "product_name": product.get("Name"),
+                "product_date": product.get("ContentDate", {}).get("Start"),
+                "bounds": bounds_4326,
+                "rgb": rgb,
+                "label_rgba": label_rgba,
+                "classes_present": classes_present,
+            }
+        except Exception as exc:
+            st.session_state.pipeline_result = {"error": str(exc)}
 
-        st.subheader("Map output")
-        st_folium(m, width=1100, height=650)
+    result = st.session_state.pipeline_result
+    if not result:
+        st.info("Configure inputs and click **Run full pipeline**.")
+        return
 
-    except Exception as exc:
-        st.exception(exc)
+    if "error" in result:
+        st.error(result["error"])
+        return
+
+    st.success(f"Geocoded: {result['resolved']}")
+    st.write(f"Coordinates (WGS84): lon={result['lon']:.6f}, lat={result['lat']:.6f}")
+    st.info(f"Selected product: `{result['product_name']}` | Date: `{result['product_date']}`")
+    st.write(f"CLC+ classes present (0 means nodata): {result['classes_present']}")
+
+    b = result["bounds"]
+    west, south, east, north = b.left, b.bottom, b.right, b.top
+    m = folium.Map(location=[(south + north) / 2, (west + east) / 2], zoom_start=13)
+    folium.raster_layers.ImageOverlay(image=result["rgb"], bounds=[[south, west], [north, east]], name="Sentinel-2 RGB").add_to(m)
+    folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
+    folium.LayerControl().add_to(m)
+
+    st.subheader("Map output")
+    st_folium(m, width=1100, height=650)
 
 
 if __name__ == "__main__":
