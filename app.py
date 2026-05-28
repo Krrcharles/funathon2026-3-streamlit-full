@@ -223,7 +223,7 @@ def main():
     folium.raster_layers.ImageOverlay(image=result["rgb"], bounds=[[south, west], [north, east]], name="Sentinel-2 RGB").add_to(m)
     if show_clc_live:
         folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
-    folium.LayerControl().add_to(m)
+    folium.LayerControl(position="topleft").add_to(m)
 
     st.subheader("Map output")
     st_folium(m, width=1100, height=650)
