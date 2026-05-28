@@ -5,6 +5,7 @@ import folium
 import numpy as np
 import requests
 import streamlit as st
+from matplotlib import colormaps
 from matplotlib.colors import to_rgba
 from pyproj import Transformer
 from rasterio.io import MemoryFile
@@ -73,7 +74,7 @@ def query_best_l2a_product(lon: float, lat: float, start_date: date, end_date: d
     return vals[0]
 
 
-def sentinelhub_rgb(token: str, lon: float, lat: float, half_size_deg: float, size_px: int) -> np.ndarray:
+def sentinelhub_rgb_ndvi(token: str, lon: float, lat: float, half_size_deg: float, size_px: int):
     bbox = [lon - half_size_deg, lat - half_size_deg, lon + half_size_deg, lat + half_size_deg]
     payload = {
         "input": {
@@ -84,10 +85,10 @@ def sentinelhub_rgb(token: str, lon: float, lat: float, half_size_deg: float, si
         "evalscript": """
 //VERSION=3
 function setup() {
-  return {input: ["B04", "B03", "B02"], output: {bands: 3, sampleType: "FLOAT32"}};
+  return {input: ["B04", "B03", "B02", "B08"], output: {bands: 4, sampleType: "FLOAT32"}};
 }
 function evaluatePixel(sample) {
-  return [sample.B04, sample.B03, sample.B02];
+  return [sample.B04, sample.B03, sample.B02, sample.B08];
 }
 """,
     }
@@ -97,13 +98,22 @@ function evaluatePixel(sample) {
 
     with MemoryFile(resp.content) as memfile:
         with memfile.open() as src:
-            rgb = src.read([1, 2, 3]).astype(np.float32)
+            bands = src.read([1, 2, 3, 4]).astype(np.float32)
             bounds_4326 = src.bounds
 
-    rgb = np.transpose(rgb, (1, 2, 0))
+    rgb = np.transpose(bands[:3], (1, 2, 0))
     p98 = np.percentile(rgb, 98)
     rgb = np.clip(rgb / (p98 if p98 > 0 else 1), 0, 1)
-    return rgb, bounds_4326
+
+    red = bands[0]
+    nir = bands[3]
+    ndvi = (nir - red) / (nir + red + 1e-6)
+    ndvi = np.clip(ndvi, -1, 1)
+
+    ndvi_norm = (ndvi + 1) / 2.0
+    ndvi_rgba = colormaps["RdYlGn"](ndvi_norm).astype(np.float32)
+    ndvi_rgba[..., 3] = 0.65
+    return rgb, ndvi_rgba, bounds_4326
 
 
 def clc_label_rgba(bounds_4326, year: int, alpha: float = 0.6):
@@ -182,7 +192,7 @@ def main():
 
             with st.spinner("3) Getting access token + Sentinel Hub RGB tile..."):
                 token = cdse_access_token(client_id, client_secret)
-                rgb, bounds_4326 = sentinelhub_rgb(token, lon, lat, half_size_deg, size_px)
+                rgb, ndvi_rgba, bounds_4326 = sentinelhub_rgb_ndvi(token, lon, lat, half_size_deg, size_px)
 
             with st.spinner("4) Downloading CLC+ label from ImageServer for same bbox..."):
                 label_rgba, classes_present = clc_label_rgba(bounds_4326, int(year))
@@ -195,6 +205,7 @@ def main():
                 "product_date": product.get("ContentDate", {}).get("Start"),
                 "bounds": bounds_4326,
                 "rgb": rgb,
+                "ndvi_rgba": ndvi_rgba,
                 "label_rgba": label_rgba,
                 "classes_present": classes_present,
             }
@@ -215,14 +226,12 @@ def main():
     st.info(f"Selected product: `{result['product_name']}` | Date: `{result['product_date']}`")
     st.write(f"CLC+ classes present (0 means nodata): {result['classes_present']}")
 
-    show_clc_live = st.toggle("Show CLC+ layer on map", value=True)
-
     b = result["bounds"]
     west, south, east, north = b.left, b.bottom, b.right, b.top
     m = folium.Map(location=[(south + north) / 2, (west + east) / 2], zoom_start=13)
     folium.raster_layers.ImageOverlay(image=result["rgb"], bounds=[[south, west], [north, east]], name="Sentinel-2 RGB").add_to(m)
-    if show_clc_live:
-        folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
+    folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
+    folium.raster_layers.ImageOverlay(image=result["ndvi_rgba"], bounds=[[south, west], [north, east]], name="NDVI", opacity=0.8).add_to(m)
     folium.LayerControl(position="topleft").add_to(m)
 
     st.subheader("Map output")
