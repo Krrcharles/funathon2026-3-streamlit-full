@@ -162,6 +162,7 @@ def main():
             size_px = st.selectbox("Output image size", [256, 384, 512], index=2)
             end_d = st.date_input("Latest acquisition date", value=date.today())
             days_back = st.slider("Lookback window (days)", 5, 365, 60)
+            show_clc = st.checkbox("Show CLC+ layer", value=True)
             run_btn = st.form_submit_button("Run full pipeline")
 
 
@@ -197,6 +198,7 @@ def main():
                 "rgb": rgb,
                 "label_rgba": label_rgba,
                 "classes_present": classes_present,
+                "show_clc": show_clc,
             }
         except Exception as exc:
             st.session_state.pipeline_result = {"error": str(exc)}
@@ -219,7 +221,8 @@ def main():
     west, south, east, north = b.left, b.bottom, b.right, b.top
     m = folium.Map(location=[(south + north) / 2, (west + east) / 2], zoom_start=13)
     folium.raster_layers.ImageOverlay(image=result["rgb"], bounds=[[south, west], [north, east]], name="Sentinel-2 RGB").add_to(m)
-    folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
+    if result.get("show_clc", True):
+        folium.raster_layers.ImageOverlay(image=result["label_rgba"], bounds=[[south, west], [north, east]], name="CLC+ label", opacity=0.8).add_to(m)
     folium.LayerControl().add_to(m)
 
     st.subheader("Map output")
