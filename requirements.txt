@@ -6,3 +6,6 @@ pyproj
 folium
 streamlit-folium
 matplotlib
+
+mlflow
+s3fs
