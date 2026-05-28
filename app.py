@@ -125,8 +125,25 @@ function evaluatePixel(sample) {
 
 @st.cache_resource(show_spinner=False)
 def load_inference_model():
+    import sys
+    import types
+
     import mlflow
     import s3fs
+    import transformers
+
+    # Backward-compatibility shim for models serialized with transformers internals
+    # that reference `transformers.core_model_loading`.
+    if "transformers.core_model_loading" not in sys.modules:
+        shim = types.ModuleType("transformers.core_model_loading")
+        try:
+            from transformers.modeling_utils import load_state_dict  # type: ignore
+
+            shim.load_state_dict = load_state_dict
+        except Exception:
+            pass
+        sys.modules["transformers.core_model_loading"] = shim
+        setattr(transformers, "core_model_loading", shim)
 
     fs = s3fs.S3FileSystem(anon=True, endpoint_url=MLFLOW_ENDPOINT)
     load_errors = []
