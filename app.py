@@ -17,7 +17,10 @@ CDSE_TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/prot
 SENTINEL_HUB_PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
 ODATA_COLLECTION_URL = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
 
-MLFLOW_MODEL_S3_RUN_PATH = "projet-funathon/mlflow-artifacts/1/a2cc538d334b474389efcc54115ef13d/artifacts/"
+MLFLOW_MODEL_S3_RUN_PATHS = [
+    "projet-funathon/mlflow-artifacts/1/a2cc538d334b474389efcc54115ef13d/artifacts/",
+    "projet-funathon/mlflow-artifacts/1/88138b467a484c54b9935b66460413cd/artifacts/",
+]
 MLFLOW_ENDPOINT = "https://minio.lab.sspcloud.fr"
 
 CLC_CLASSES = [
@@ -126,19 +129,23 @@ def load_inference_model():
     import s3fs
 
     fs = s3fs.S3FileSystem(anon=True, endpoint_url=MLFLOW_ENDPOINT)
-    local_model_dir = Path(tempfile.mkdtemp()) / "model"
-    fs.get(MLFLOW_MODEL_S3_RUN_PATH + "model", str(local_model_dir), recursive=True)
-    try:
-        model = mlflow.pyfunc.load_model(str(local_model_dir))
-    except Exception as exc:
-        raise RuntimeError(
-            "Failed to load the pretrained MLflow model. "
-            "This is usually caused by an incompatible transformers version; "
-            "use transformers==4.46.3 and tokenizers==0.20.3."
-        ) from exc
+    load_errors = []
 
-    run_params = requests.get(MLFLOW_ENDPOINT + "/" + MLFLOW_MODEL_S3_RUN_PATH + "params.json", timeout=30).json()
-    return model, run_params
+    for run_path in MLFLOW_MODEL_S3_RUN_PATHS:
+        local_model_dir = Path(tempfile.mkdtemp()) / "model"
+        try:
+            fs.get(run_path + "model", str(local_model_dir), recursive=True)
+            model = mlflow.pyfunc.load_model(str(local_model_dir))
+            run_params = requests.get(MLFLOW_ENDPOINT + "/" + run_path + "params.json", timeout=30).json()
+            return model, run_params
+        except Exception as exc:
+            load_errors.append(f"{run_path}: {exc}")
+
+    raise RuntimeError(
+        "Failed to load pretrained MLflow model from all configured run paths. "
+        "Please check dependency versions and model artifact compatibility. "
+        f"Errors: {' | '.join(load_errors)}"
+    )
 
 
 def predict_clc_like_rgba(bands: np.ndarray, alpha: float = 0.55):
