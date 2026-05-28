@@ -9,3 +9,4 @@ matplotlib
 
 mlflow
 s3fs
+transformers==4.40.2

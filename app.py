@@ -128,7 +128,14 @@ def load_inference_model():
     fs = s3fs.S3FileSystem(anon=True, endpoint_url=MLFLOW_ENDPOINT)
     local_model_dir = Path(tempfile.mkdtemp()) / "model"
     fs.get(MLFLOW_MODEL_S3_RUN_PATH + "model", str(local_model_dir), recursive=True)
-    model = mlflow.pyfunc.load_model(str(local_model_dir))
+    try:
+        model = mlflow.pyfunc.load_model(str(local_model_dir))
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to load the pretrained MLflow model. "
+            "This is usually caused by an incompatible transformers version; "
+            "use transformers==4.40.2."
+        ) from exc
 
     run_params = requests.get(MLFLOW_ENDPOINT + "/" + MLFLOW_MODEL_S3_RUN_PATH + "params.json", timeout=30).json()
     return model, run_params
